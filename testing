@@ -1,0 +1,76 @@
+import requests
+import pandas as pd
+import time
+
+# --- 🔐 Your Lightcast Credentials ---
+CLIENT_ID = "dnaqre9zy5c62yuo"
+CLIENT_SECRET = "5yFYyV8E"
+SCOPE = "emsi_open"
+
+# --- 🌐 Lightcast URLs ---
+TOKEN_URL = "https://auth.emsicloud.com/connect/token"
+API_URL = "https://emsiservices.com/skills/versions/latest/skills"  # Use a different endpoint for jobs if needed
+OUTPUT_FILE = "lightcast_skills_limited_export.xlsx"
+
+# --- 🔑 Get OAuth Token ---
+def get_access_token():
+    data = {
+        'client_id': CLIENT_ID,
+        'client_secret': CLIENT_SECRET,
+        'grant_type': 'client_credentials',
+        'scope': SCOPE
+    }
+    response = requests.post(TOKEN_URL, data=data)
+    response.raise_for_status()
+    return response.json()['access_token']
+
+# --- 📥 Fetch Skills (with rate limiting) ---
+def fetch_data_throttled(access_token, max_pages=20):
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+
+    skills = []
+    for page in range(1, max_pages + 1):
+        params = {
+            "page": page,
+            "limit": 100  # Adjust if your plan supports different limits
+        }
+        response = requests.get(API_URL, headers=headers, params=params)
+
+        if response.status_code != 200:
+            print(f"❌ Error at page {page}: {response.status_code}")
+            break
+
+        data = response.json()
+
+        for skill in data.get("skills", []):
+            skills.append({
+                "Skill Name": skill.get("name", ""),
+                "Skill Type": skill.get("type", ""),
+                "Skill ID": skill.get("id", ""),
+                "Category": skill.get("category", {}).get("name", "") if skill.get("category") else "",
+            })
+
+        print(f"✅ Page {page} fetched | Total so far: {len(skills)}")
+
+        # Rate limit: max 5 requests/sec → wait 0.2 sec per request
+        time.sleep(0.2)
+
+        # Stop early if we hit the end
+        if len(data.get("skills", [])) < 100:
+            break
+
+    return skills
+
+# --- 📊 Export to Excel ---
+def export_to_excel(data):
+    df = pd.DataFrame(data)
+    df.to_excel(OUTPUT_FILE, index=False)
+    print(f"🎉 Export complete! {len(data)} skills saved to {OUTPUT_FILE}")
+
+# --- 🚀 Main Runner ---
+if __name__ == "__main__":
+    token = get_access_token()
+    skill_data = fetch_data_throttled(token, max_pages=20)
+    export_to_excel(skill_data)
